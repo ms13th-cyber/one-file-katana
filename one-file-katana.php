@@ -3,7 +3,7 @@
 Plugin Name: One File Katana
 Plugin URI: https://github.com/ms13th-cyber/one-file-katana
 Description: 無駄を切り捨て、WordPressを研ぎ澄ます一振り。 / Slash the bloat. Purify your WordPress.
-Version: 1.1.0
+Version: 1.1.1
 Tested up to: 6.9.4
 Requires PHP: 8.3.23
 Author: masato shibuya (Image-box Co., Ltd.)
@@ -108,7 +108,7 @@ add_action('init', function() {
 
 	$plugin_file = 'one-file-katana/one-file-katana.php';
 	$repo = 'ms13th-cyber/one-file-katana';
-	$current_version = '1.1.0';
+	$current_version = '1.1.1';
 
 	// 1. 更新検知ロジック
 	add_filter('pre_set_site_transient_update_plugins', function($transient) use ($repo, $current_version, $plugin_file) {
