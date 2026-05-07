@@ -3,11 +3,10 @@
 Plugin Name: One File Katana
 Plugin URI: https://github.com/ms13th-cyber/one-file-katana
 Description: 無駄を切り捨て、WordPressを研ぎ澄ます一振り。 / Slash the bloat. Purify your WordPress.
-Version: 1.0.0
+Version: 1.1.0
 Tested up to: 6.9.4
 Requires PHP: 8.3.23
 Author: masato shibuya (Image-box Co., Ltd.)
-Author URI: https://image-box.jp
 License: GPL2
 */
 
@@ -25,45 +24,42 @@ add_action('init', function() {
     remove_filter('the_content_feed', 'wp_staticize_emoji');
     remove_filter('comment_text_rss', 'wp_staticize_emoji');
     remove_filter('wp_mail', 'wp_staticize_emoji_for_email');
-
-    // DNS Prefetch 削除
     add_filter('emoji_svg_url', '__return_false');
 
-    // WPバージョン情報の削除
+    // WPバージョン情報 / RSD / wlwmanifest / Shortlink の削除
     remove_action('wp_head', 'wp_generator');
-
-    // RSD / wlwmanifest / Shortlink の削除
     remove_action('wp_head', 'rsd_link');
     remove_action('wp_head', 'wlwmanifest_link');
     remove_action('wp_head', 'wp_shortlink_wp_head');
 
-    // oEmbed 関連の削除 (外部埋め込み機能の停止)
+    // oEmbed 関連の削除
     remove_action('wp_head', 'wp_oembed_add_discovery_links');
     remove_action('wp_head', 'wp_oembed_add_host_js');
+
+    // 最近のコメントのインラインスタイル削除
+    add_filter('show_recent_comments_widget_style', '__return_false');
 });
+
+// Gutenberg由来の巨大なSVGフィルタやインラインCSSを抜く
+remove_action('wp_body_open', 'wp_global_styles_render_svg_filters');
+add_action('wp_enqueue_scripts', function() {
+    wp_dequeue_style('global-styles');
+}, 100);
 
 /**
  * Katana - Stage 2: Security & Stealth (情報の隠蔽と防御)
  */
 
-// 1. JS/CSSのバージョンクエリ (?ver=x.x) を削除して隠蔽
+// 1. JS/CSSのバージョンクエリ (?ver=x.x) を削除
 function katana_remove_src_version($src) {
-    if (strpos($src, 'ver=')) {
-        $src = remove_query_arg('ver', $src);
-    }
-    return $src;
+    return (strpos($src, 'ver=')) ? remove_query_arg('ver', $src) : $src;
 }
 add_filter('script_loader_src', 'katana_remove_src_version', 15);
 add_filter('style_loader_src', 'katana_remove_src_version', 15);
 
 // 2. REST API ユーザーエンドポイントを無効化 (ID漏洩防止)
 add_filter('rest_endpoints', function($endpoints) {
-    if (isset($endpoints['/wp/v2/users'])) {
-        unset($endpoints['/wp/v2/users']);
-    }
-    if (isset($endpoints['/wp/v2/users/(?P<id>[\d]+)'])) {
-        unset($endpoints['/wp/v2/users/(?P<id>[\d]+)']);
-    }
+    unset($endpoints['/wp/v2/users'], $endpoints['/wp/v2/users/(?P<id>[\d]+)']);
     return $endpoints;
 });
 
@@ -74,25 +70,80 @@ add_filter('wp_headers', function($headers) {
     return $headers;
 });
 
-// 4. ログインエラーメッセージを曖昧にして推測を防ぐ
+// 4. ログインエラーメッセージを曖昧にする
 add_filter('login_errors', function() {
     return 'ログイン情報に誤りがあります。正しく入力してください。';
 });
 
+// 5. Authorアーカイブを無効化 (ユーザー名推測防止)
+add_action('template_redirect', function() {
+    if (is_author()) {
+        wp_safe_redirect(home_url(), 301);
+        exit;
+    }
+});
+
+// 6. アプリケーションパスワードの無効化
+add_filter('wp_is_application_passwords_available', '__return_false');
+
 /**
- * Katana - Stage 3: Footnote (おまけ: フッターのwp-embed.min.js等を削除)
+ * Katana - Stage 3: Performance & Footnote (研磨と仕上げ)
  */
+
+// wp-embed.min.js の削除
 add_action('wp_footer', function() {
     wp_deregister_script('wp-embed');
 });
 
+// Heartbeat API の無効化 (管理画面の軽量化)
+add_action('init', function() {
+    wp_deregister_script('heartbeat');
+});
 
-require_once __DIR__ . '/plugin-update-checker/plugin-update-checker.php';
+/**
+ * Katana - Update Check (Standalone One-File Implementation)
+ */
+add_action('init', function() {
+    if (!is_admin()) return;
 
-$updateChecker = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
-    'https://github.com/ms13th-cyber/one-file-katana/',
-    __FILE__,
-    'one-file-katana'
-);
+    $plugin_file = 'one-file-katana/one-file-katana.php';
+    $repo = 'ms13th-cyber/one-file-katana';
+    $current_version = '1.1.0';
 
-$updateChecker->setBranch('main');
+    add_filter('pre_set_site_transient_update_plugins', function($transient) use ($repo, $current_version, $plugin_file) {
+        if (empty($transient->checked)) return $transient;
+
+        $remote = get_transient('katana_update_check');
+        if (false === $remote) {
+            $response = wp_remote_get("https://api.github.com/repos/{$repo}/releases/latest", [
+                'headers' => ['User-Agent' => 'WordPress/' . get_bloginfo('version')]
+            ]);
+
+            if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) return $transient;
+
+            $remote = json_decode(wp_remote_retrieve_body($response));
+            set_transient('katana_update_check', $remote, 12 * HOUR_IN_SECONDS);
+        }
+
+        if ($remote && version_compare($current_version, ltrim($remote->tag_name, 'v'), '<')) {
+            $res = new stdClass();
+            $res->slug = 'one-file-katana';
+            $res->plugin = $plugin_file;
+            $res->new_version = ltrim($remote->tag_name, 'v');
+            $res->url = $remote->html_url;
+            $res->package = $remote->zipball_url;
+            $transient->response[$plugin_file] = $res;
+        }
+
+        return $transient;
+    });
+
+    // Fix for Zipball structure
+    add_filter('upgrader_source_selection', function($source, $remote_source, $upgrader, $hook_extra) use ($plugin_file) {
+        if (strpos($source, 'one-file-katana') !== false) {
+            $new_source = trailingslashit($remote_source) . 'one-file-katana/';
+            if (rename($source, $new_source)) return $new_source;
+        }
+        return $source;
+    }, 10, 4);
+});
