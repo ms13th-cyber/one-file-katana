@@ -3,7 +3,7 @@
 Plugin Name: One File Katana
 Plugin URI: https://github.com/ms13th-cyber/one-file-katana
 Description: 無駄を切り捨て、WordPressを研ぎ澄ます一振り。 / Slash the bloat. Purify your WordPress.
-Version: 1.1.3
+Version: 1.1.4
 Tested up to: 6.9.4
 Requires PHP: 8.3.23
 Author: masato shibuya (Image-box Co., Ltd.)
@@ -108,31 +108,28 @@ add_action('init', function() {
 
 	$plugin_file = 'one-file-katana/one-file-katana.php';
 	$repo = 'ms13th-cyber/one-file-katana';
-	$current_version = '1.1.3'; // 現在のバージョン
+	$current_version = '1.1.4'; // ソース内のバージョンを適切に更新してください
 
 	add_filter('pre_set_site_transient_update_plugins', function($transient) use ($repo, $current_version, $plugin_file) {
-		// $transient がオブジェクトでない場合は初期化
-		if (!is_object($transient)) {
-			$transient = new stdClass();
-		}
+		if (!is_object($transient)) $transient = new stdClass();
 
-		// リクエスト制限対策: GitHubトークンが設定されていれば使用
-		$args = [
-			'headers' => [
-				'User-Agent' => 'WordPress/' . get_bloginfo('version'),
-				'Accept'     => 'application/vnd.github.v3+json',
-			],
-			'timeout' => 10,
-		];
-
-		if (defined('KATANA_GITHUB_TOKEN')) {
-			$args['headers']['Authorization'] = 'token ' . KATANA_GITHUB_TOKEN;
-		}
-
+		// 12時間キャッシュを取得
 		$remote = get_transient('katana_update_check');
 
-		// 開発中の確認用: 常に最新を取得したい場合は一時的に false === $remote の条件を外す
 		if (false === $remote) {
+			$args = [
+				'headers' => [
+					'User-Agent' => 'WordPress/' . get_bloginfo('version'),
+					'Accept'     => 'application/vnd.github.v3+json',
+				],
+				'timeout' => 10,
+			];
+
+			// wp-config.php のトークンがあれば使用
+			if (defined('KATANA_GITHUB_TOKEN')) {
+				$args['headers']['Authorization'] = 'token ' . KATANA_GITHUB_TOKEN;
+			}
+
 			$response = wp_remote_get("https://api.github.com/repos/{$repo}/releases/latest", $args);
 
 			if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) === 200) {
@@ -144,6 +141,7 @@ add_action('init', function() {
 		if ($remote && isset($remote->tag_name)) {
 			$new_version = ltrim($remote->tag_name, 'v');
 
+			// バージョン比較
 			if (version_compare($current_version, $new_version, '<')) {
 				$res = new stdClass();
 				$res->slug     = 'one-file-katana';
@@ -153,20 +151,31 @@ add_action('init', function() {
 				$res->package  = $remote->zipball_url;
 
 				$transient->response[$plugin_file] = $res;
+
+				// responseにある場合は no_update から削除（混在を防ぐ）
+				if (isset($transient->no_update[$plugin_file])) {
+					unset($transient->no_update[$plugin_file]);
+				}
 			} else {
 				$res = new stdClass();
 				$res->slug     = 'one-file-katana';
 				$res->plugin   = $plugin_file;
 				$res->new_version = $current_version;
 				$res->package  = '';
+
 				$transient->no_update[$plugin_file] = $res;
+
+				// no_updateにある場合は response から削除
+				if (isset($transient->response[$plugin_file])) {
+					unset($transient->response[$plugin_file]);
+				}
 			}
 		}
 
 		return $transient;
 	});
 
-	// 2. 更新詳細情報の補完（ポップアップ表示用）
+	// 詳細情報の表示ロジック
 	add_filter('plugins_api', function($res, $action, $args) use ($repo) {
 		if ($action !== 'plugin_information' || (isset($args->slug) && $args->slug !== 'one-file-katana')) return $res;
 
@@ -187,7 +196,7 @@ add_action('init', function() {
 		return $res;
 	}, 10, 3);
 
-	// 3. Zip解凍時のディレクトリ名調整
+	// ディレクトリ名調整
 	add_filter('upgrader_source_selection', function($source, $remote_source, $upgrader, $hook_extra) {
 		if (strpos($source, 'one-file-katana') !== false) {
 			$new_source = trailingslashit($remote_source) . 'one-file-katana/';
