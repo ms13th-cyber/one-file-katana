@@ -3,7 +3,7 @@
 Plugin Name: One File Katana
 Plugin URI: https://github.com/ms13th-cyber/one-file-katana
 Description: 無駄を切り捨て、WordPressを研ぎ澄ます一振り。 / Slash the bloat. Purify your WordPress.
-Version: 1.1.2
+Version: 1.1.3
 Tested up to: 6.9.4
 Requires PHP: 8.3.23
 Author: masato shibuya (Image-box Co., Ltd.)
@@ -104,67 +104,77 @@ add_action('init', function() {
  * Katana - Update Check & Auto-update Support
  */
 add_action('init', function() {
-    if (!is_admin()) return;
+	if (!is_admin()) return;
 
-    $plugin_file = 'one-file-katana/one-file-katana.php';
-    $repo = 'ms13th-cyber/one-file-katana';
-    $current_version = '1.1.2';
+	$plugin_file = 'one-file-katana/one-file-katana.php'; // フォルダ名/ファイル名
+	$repo = 'ms13th-cyber/one-file-katana';
+	$current_version = '1.1.3';
 
-    // 1. 更新検知 & パッケージURLの提供（これだけで自動更新スイッチが機能します）
-    add_filter('pre_set_site_transient_update_plugins', function($transient) use ($repo, $current_version, $plugin_file) {
-        if (empty($transient->checked)) return $transient;
+	// 1. 更新検知 & パッケージURLの提供
+	add_filter('pre_set_site_transient_update_plugins', function($transient) use ($repo, $current_version, $plugin_file) {
+		if (empty($transient)) $transient = new stdClass();
+		if (!isset($transient->checked)) return $transient;
 
-        $remote = get_transient('katana_update_check');
-        if (false === $remote) {
-            $response = wp_remote_get("https://api.github.com/repos/{$repo}/releases/latest", [
-                'headers' => ['User-Agent' => 'WordPress/' . get_bloginfo('version')]
-            ]);
+		$remote = get_transient('katana_update_check');
+		if (false === $remote) {
+			$response = wp_remote_get("https://api.github.com/repos/{$repo}/releases/latest", [
+				'headers' => ['User-Agent' => 'WordPress/' . get_bloginfo('version')]
+			]);
 
-            if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) return $transient;
+			if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) return $transient;
 
-            $remote = json_decode(wp_remote_retrieve_body($response));
-            set_transient('katana_update_check', $remote, 12 * HOUR_IN_SECONDS);
-        }
+			$remote = json_decode(wp_remote_retrieve_body($response));
+			set_transient('katana_update_check', $remote, 12 * HOUR_IN_SECONDS);
+		}
 
-        if ($remote && version_compare($current_version, ltrim($remote->tag_name, 'v'), '<')) {
-            $res = new stdClass();
-            $res->slug = 'one-file-katana';
-            $res->plugin = $plugin_file;
-            $res->new_version = ltrim($remote->tag_name, 'v');
-            $res->url = $remote->html_url;
-            $res->package = $remote->zipball_url; // これが自動更新に必須
-            $transient->response[$plugin_file] = $res;
-        }
-        return $transient;
-    });
+		if ($remote && version_compare($current_version, ltrim($remote->tag_name, 'v'), '<')) {
+			$res = new stdClass();
+			$res->slug     = 'one-file-katana';
+			$res->plugin   = $plugin_file; // 明示的に指定
+			$res->new_version = ltrim($remote->tag_name, 'v');
+			$res->url      = $remote->html_url;
+			$res->package  = $remote->zipball_url;
 
-    // 2. 更新詳細情報の補完（ポップアップ表示用）
-    add_filter('plugins_api', function($res, $action, $args) use ($repo) {
-        if ($action !== 'plugin_information' || (isset($args->slug) && $args->slug !== 'one-file-katana')) return $res;
+			$transient->response[$plugin_file] = $res;
+		} else {
+			// 更新がない場合でも、no_updateに入れておくことで管理画面が認識しやすくなります
+			$res = new stdClass();
+			$res->slug     = 'one-file-katana';
+			$res->plugin   = $plugin_file;
+			$res->new_version = $current_version;
+			$res->package  = '';
+			$transient->no_update[$plugin_file] = $res;
+		}
+		return $transient;
+	});
 
-        $remote = get_transient('katana_update_check');
-        if (!$remote) return $res;
+	// 2. 更新詳細情報の補完（ポップアップ表示用）
+	add_filter('plugins_api', function($res, $action, $args) use ($repo) {
+		if ($action !== 'plugin_information' || (isset($args->slug) && $args->slug !== 'one-file-katana')) return $res;
 
-        $res = new stdClass();
-        $res->name = 'One File Katana';
-        $res->slug = 'one-file-katana';
-        $res->version = ltrim($remote->tag_name, 'v');
-        $res->author = 'masato shibuya (Image-box Co., Ltd.)';
-        $res->homepage = 'https://github.com/' . $repo;
-        $res->download_link = $remote->zipball_url;
-        $res->sections = [
-            'description' => '無駄を切り捨て、WordPressを研ぎ澄ます一振り。',
-            'changelog' => isset($remote->body) ? make_clickable(nl2br(esc_html($remote->body))) : '最新版にアップデートしてください。'
-        ];
-        return $res;
-    }, 10, 3);
+		$remote = get_transient('katana_update_check');
+		if (!$remote) return $res;
 
-    // 3. Zip解凍時のディレクトリ名調整
-    add_filter('upgrader_source_selection', function($source, $remote_source, $upgrader, $hook_extra) {
-        if (strpos($source, 'one-file-katana') !== false) {
-            $new_source = trailingslashit($remote_source) . 'one-file-katana/';
-            if (rename($source, $new_source)) return $new_source;
-        }
-        return $source;
-    }, 10, 4);
+		$res = new stdClass();
+		$res->name     = 'One File Katana';
+		$res->slug     = 'one-file-katana';
+		$res->version  = ltrim($remote->tag_name, 'v');
+		$res->author   = 'masato shibuya (Image-box Co., Ltd.)';
+		$res->homepage = 'https://github.com/' . $repo;
+		$res->download_link = $remote->zipball_url;
+		$res->sections = [
+			'description' => '無駄を切り捨て、WordPressを研ぎ澄ます一振り。',
+			'changelog'   => isset($remote->body) ? make_clickable(nl2br(esc_html($remote->body))) : '最新版にアップデートしてください。'
+		];
+		return $res;
+	}, 10, 3);
+
+	// 3. Zip解凍時のディレクトリ名調整
+	add_filter('upgrader_source_selection', function($source, $remote_source, $upgrader, $hook_extra) {
+		if (strpos($source, 'one-file-katana') !== false) {
+			$new_source = trailingslashit($remote_source) . 'one-file-katana/';
+			if (rename($source, $new_source)) return $new_source;
+		}
+		return $source;
+	}, 10, 4);
 });
