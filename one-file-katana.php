@@ -104,67 +104,67 @@ add_action('init', function() {
  * Katana - Update Check & Auto-update Support
  */
 add_action('init', function() {
-    if (!is_admin()) return;
+	if (!is_admin()) return;
 
-    $plugin_file = 'one-file-katana/one-file-katana.php';
-    $repo = 'ms13th-cyber/one-file-katana';
-    $current_version = '1.1.3'; // 現在のバージョン
+	$plugin_file = 'one-file-katana/one-file-katana.php';
+	$repo = 'ms13th-cyber/one-file-katana';
+	$current_version = '1.1.3'; // 現在のバージョン
 
-    add_filter('pre_set_site_transient_update_plugins', function($transient) use ($repo, $current_version, $plugin_file) {
-        // $transient がオブジェクトでない場合は初期化
-        if (!is_object($transient)) {
-            $transient = new stdClass();
-        }
+	add_filter('pre_set_site_transient_update_plugins', function($transient) use ($repo, $current_version, $plugin_file) {
+		// $transient がオブジェクトでない場合は初期化
+		if (!is_object($transient)) {
+			$transient = new stdClass();
+		}
 
-        // リクエスト制限対策: GitHubトークンが設定されていれば使用
-        $args = [
-            'headers' => [
-                'User-Agent' => 'WordPress/' . get_bloginfo('version'),
-                'Accept'     => 'application/vnd.github.v3+json',
-            ],
-            'timeout' => 10,
-        ];
+		// リクエスト制限対策: GitHubトークンが設定されていれば使用
+		$args = [
+			'headers' => [
+				'User-Agent' => 'WordPress/' . get_bloginfo('version'),
+				'Accept'     => 'application/vnd.github.v3+json',
+			],
+			'timeout' => 10,
+		];
 
-        if (defined('KATANA_GITHUB_TOKEN')) {
-            $args['headers']['Authorization'] = 'token ' . KATANA_GITHUB_TOKEN;
-        }
+		if (defined('KATANA_GITHUB_TOKEN')) {
+			$args['headers']['Authorization'] = 'token ' . KATANA_GITHUB_TOKEN;
+		}
 
-        $remote = get_transient('katana_update_check');
+		$remote = get_transient('katana_update_check');
 
-        // 開発中の確認用: 常に最新を取得したい場合は一時的に false === $remote の条件を外す
-        if (false === $remote) {
-            $response = wp_remote_get("https://api.github.com/repos/{$repo}/releases/latest", $args);
+		// 開発中の確認用: 常に最新を取得したい場合は一時的に false === $remote の条件を外す
+		if (false === $remote) {
+			$response = wp_remote_get("https://api.github.com/repos/{$repo}/releases/latest", $args);
 
-            if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) === 200) {
-                $remote = json_decode(wp_remote_retrieve_body($response));
-                set_transient('katana_update_check', $remote, 12 * HOUR_IN_SECONDS);
-            }
-        }
+			if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) === 200) {
+				$remote = json_decode(wp_remote_retrieve_body($response));
+				set_transient('katana_update_check', $remote, 12 * HOUR_IN_SECONDS);
+			}
+		}
 
-        if ($remote && isset($remote->tag_name)) {
-            $new_version = ltrim($remote->tag_name, 'v');
+		if ($remote && isset($remote->tag_name)) {
+			$new_version = ltrim($remote->tag_name, 'v');
 
-            if (version_compare($current_version, $new_version, '<')) {
-                $res = new stdClass();
-                $res->slug     = 'one-file-katana';
-                $res->plugin   = $plugin_file;
-                $res->new_version = $new_version;
-                $res->url      = $remote->html_url;
-                $res->package  = $remote->zipball_url;
+			if (version_compare($current_version, $new_version, '<')) {
+				$res = new stdClass();
+				$res->slug     = 'one-file-katana';
+				$res->plugin   = $plugin_file;
+				$res->new_version = $new_version;
+				$res->url      = $remote->html_url;
+				$res->package  = $remote->zipball_url;
 
-                $transient->response[$plugin_file] = $res;
-            } else {
-                $res = new stdClass();
-                $res->slug     = 'one-file-katana';
-                $res->plugin   = $plugin_file;
-                $res->new_version = $current_version;
-                $res->package  = '';
-                $transient->no_update[$plugin_file] = $res;
-            }
-        }
+				$transient->response[$plugin_file] = $res;
+			} else {
+				$res = new stdClass();
+				$res->slug     = 'one-file-katana';
+				$res->plugin   = $plugin_file;
+				$res->new_version = $current_version;
+				$res->package  = '';
+				$transient->no_update[$plugin_file] = $res;
+			}
+		}
 
-        return $transient;
-    });
+		return $transient;
+	});
 
 	// 2. 更新詳細情報の補完（ポップアップ表示用）
 	add_filter('plugins_api', function($res, $action, $args) use ($repo) {
